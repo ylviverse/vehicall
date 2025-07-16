@@ -1,15 +1,11 @@
-import 'package:VehiCall/model/car.dart';
-import 'package:VehiCall/model/car_tile.dart';
-import 'package:VehiCall/model/fav.dart';
 import 'package:VehiCall/model/post.dart';
 import 'package:VehiCall/components/post_card.dart';
 import 'package:VehiCall/Pages/create_post_page.dart';
 import 'package:VehiCall/Pages/message_page.dart';
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide Provider;
-import 'package:http/http.dart' as http;
 import 'package:VehiCall/Pages/post_detail_page.dart';
+import 'package:VehiCall/utils/error_handler.dart';
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class RentPage extends StatefulWidget {
   const RentPage({super.key});
@@ -20,59 +16,114 @@ class RentPage extends StatefulWidget {
 
 class _RentPageState extends State<RentPage> {
   final _supabase = Supabase.instance.client;
+  final _searchController = TextEditingController();
   List<Post> _posts = [];
+  List<Post> _filteredPosts = [];
   bool _isLoadingPosts = true;
-  String? _errorMessage;
   bool _isDeletingPost = false;
 
   @override
   void initState() {
     super.initState();
     _loadPosts();
+    _searchController.addListener(_filterPosts);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_filterPosts);
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPosts() async {
+    if (!mounted) return;
+
     setState(() {
       _isLoadingPosts = true;
-      _errorMessage = null;
     });
 
     try {
-      // Fetch posts from Supabase
-      final response = await _supabase
+      // Check if Supabase is initialized
+      final client = _supabase;
+      if (client == null) {
+        throw Exception('Database connection not available');
+      }
+
+      final response = await client
           .from('posts')
           .select()
           .order('created_at', ascending: false);
 
-      print('Fetched ${response.length} posts from database');
+      if (!mounted) return;
 
-      // Convert to Post objects
       final posts =
-          response.map((post) {
-            // Create post
-            final postObj = Post.fromJson(post);
-
-            // Log the image URL for debugging
-            print('Post ID: ${postObj.id}, Image URL: ${postObj.imageUrl}');
-
-            return postObj;
-          }).toList();
+          response
+              .map((post) {
+                try {
+                  return Post.fromJson(post);
+                } catch (e) {
+                  print('Error parsing post: $e');
+                  return null;
+                }
+              })
+              .where((post) => post != null)
+              .cast<Post>()
+              .toList();
 
       setState(() {
-        _posts = List<Post>.from(posts);
+        _posts = posts;
+        _filteredPosts = List<Post>.from(posts);
         _isLoadingPosts = false;
       });
     } catch (e) {
       print('Error loading posts: $e');
-      setState(() {
-        _errorMessage = 'Error loading posts: ${e.toString()}';
-        _isLoadingPosts = false;
-      });
+      if (mounted) {
+        setState(() {
+          _posts = [];
+          _filteredPosts = [];
+          _isLoadingPosts = false;
+        });
+
+        // Only show error snackbar for network/server errors, not for empty results
+        if (e.toString().contains('network') ||
+            e.toString().contains('server') ||
+            e.toString().contains('connection')) {
+          ErrorHandler.showErrorSnackBar(
+            context,
+            'Error loading posts: ${e.toString()}',
+          );
+        }
+      }
     }
   }
 
+  void _filterPosts() {
+    if (!mounted) return;
+
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredPosts = List<Post>.from(_posts);
+      } else {
+        _filteredPosts =
+            _posts.where((post) {
+              final title = post.title?.toLowerCase() ?? '';
+              // FIX: Handle null description safely
+              final description = post.description?.toLowerCase() ?? '';
+              final userName = post.userName.toLowerCase();
+              final price = post.price?.toLowerCase() ?? '';
+
+              return title.contains(query) ||
+                  description.contains(query) ||
+                  userName.contains(query) ||
+                  price.contains(query);
+            }).toList();
+      }
+    });
+  }
+
   Future<void> _deletePost(int postId) async {
-    // Show confirmation dialog
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder:
@@ -96,36 +147,24 @@ class _RentPageState extends State<RentPage> {
           ),
     );
 
-    if (shouldDelete != true) return;
+    if (shouldDelete != true || !mounted) return;
 
     setState(() {
       _isDeletingPost = true;
     });
 
     try {
-      // Delete the post from the database
       await _supabase.from('posts').delete().eq('id', postId);
-
-      // Reload posts after deletion
       await _loadPosts();
 
-      // Show success message
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Post deleted successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        ErrorHandler.showSuccessSnackBar(context, 'Post deleted successfully');
       }
     } catch (e) {
-      // Show error message
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error deleting post: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
+        ErrorHandler.showErrorSnackBar(
+          context,
+          'Error deleting post: ${e.toString()}',
         );
       }
     } finally {
@@ -137,27 +176,13 @@ class _RentPageState extends State<RentPage> {
     }
   }
 
-  void addCarToFav(Car car) {
-    Provider.of<Fav>(context, listen: false).addItemToCart(car);
-
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: Text('Successfully Added!'),
-            content: Text('Check your Favorites'),
-          ),
-    );
-  }
-
   void _navigateToCreatePost() async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const CreatePostPage()),
     );
 
-    // If post was created successfully, reload posts
-    if (result == true) {
+    if (result == true && mounted) {
       _loadPosts();
     }
   }
@@ -169,205 +194,252 @@ class _RentPageState extends State<RentPage> {
     );
   }
 
+  void _navigateToMessage(Post post) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder:
+            (context) => MessagePage(
+              recipientId: post.userId,
+              recipientName: post.userName,
+              postTitle: post.title,
+            ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Consumer<Fav>(
-      builder:
-          (context, value, child) => RefreshIndicator(
-            onRefresh: _loadPosts,
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
+    return RefreshIndicator(
+      onRefresh: _loadPosts,
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 25),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  //search bar
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    margin: const EdgeInsets.symmetric(horizontal: 25),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Search Here...',
-                          style: TextStyle(color: Colors.grey),
+                  const SizedBox(height: 20),
+
+                  // Search bar
+                  TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search vehicles, users, or prices...',
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: Color(0xFF123458),
+                      ),
+                      suffixIcon:
+                          _searchController.text.isNotEmpty
+                              ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                },
+                              )
+                              : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Color(0xFF123458),
+                          width: 2,
                         ),
-                        Icon(Icons.search, color: Colors.grey),
-                      ],
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
                     ),
                   ),
+
                   const SizedBox(height: 20),
 
                   // Create Post Button
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 25),
+                  SizedBox(
+                    width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: _navigateToCreatePost,
                       icon: const Icon(Icons.add_photo_alternate),
-                      label: const Text('Create Post'),
+                      label: const Text('Create New Post'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF123458),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
 
-                  // Posts Section
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 25),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recent Posts',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 20,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
+                  const SizedBox(height: 30),
 
-                        // Posts list or loading indicator
-                        _isLoadingPosts || _isDeletingPost
-                            ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(20.0),
-                                child: CircularProgressIndicator(),
-                              ),
-                            )
-                            : _errorMessage != null
-                            ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(20.0),
-                                child: Text(
-                                  _errorMessage!,
-                                  style: const TextStyle(color: Colors.red),
-                                ),
-                              ),
-                            )
-                            : _posts.isEmpty
-                            ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(20.0),
-                                child: Column(
-                                  children: [
-                                    Icon(
-                                      Icons.photo_album_outlined,
-                                      size: 60,
-                                      color: Colors.grey[400],
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      'No posts yet. Be the first to share!',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 16,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                            : SizedBox(
-                              height:
-                                  MediaQuery.of(context).size.width *
-                                  0.9, // Responsive height based on screen width
-                              child: ListView.builder(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: _posts.length,
-                                itemBuilder: (context, index) {
-                                  return PostCard(
-                                    post: _posts[index],
-                                    onDelete:
-                                        () => _deletePost(_posts[index].id),
-                                    onMessageTap: () {
-                                      // Navigate to the message tab with recipient information
-                                      setState(() {
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder:
-                                                (context) => MessagePage(
-                                                  recipientId:
-                                                      _posts[index].userId,
-                                                  recipientName:
-                                                      _posts[index].userName,
-                                                  postTitle:
-                                                      _posts[index].title,
-                                                ),
-                                          ),
-                                        );
-                                      });
-                                    },
-                                    onTap:
-                                        () => _navigateToPostDetail(
-                                          _posts[index],
-                                        ),
-                                  );
-                                },
-                              ),
+                  // Posts Section Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Available Vehicles',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 24,
+                              color: Color(0xFF123458),
                             ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 25),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        const Text(
-                          'Available Cars',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 20,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _filteredPosts.length == 1
+                                ? '${_filteredPosts.length} vehicle available'
+                                : '${_filteredPosts.length} vehicles available',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_searchController.text.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            _searchController.clear();
+                          },
+                          child: const Text(
+                            'Clear Search',
+                            style: TextStyle(
+                              color: Color(0xFF123458),
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                        Text(
-                          'See All',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
 
                   const SizedBox(height: 20),
-
-                  SizedBox(
-                    height:
-                        MediaQuery.of(context).size.width *
-                        0.7, // Reduced and responsive height
-                    child: ListView.builder(
-                      itemCount: 4,
-                      scrollDirection: Axis.horizontal,
-                      itemBuilder: (context, index) {
-                        Car car = value.getCarlist()[index];
-                        return CarTile(car: car, onTap: () => addCarToFav(car));
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 10), // Reduced bottom padding
                 ],
               ),
             ),
           ),
+
+          // Posts content
+          if (_isLoadingPosts || _isDeletingPost)
+            const SliverToBoxAdapter(
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40.0),
+                  child: CircularProgressIndicator(color: Color(0xFF123458)),
+                ),
+              ),
+            )
+          else if (_filteredPosts.isEmpty && _searchController.text.isNotEmpty)
+            SliverToBoxAdapter(child: _buildEmptySearchResults())
+          else if (_filteredPosts.isEmpty)
+            SliverToBoxAdapter(child: _buildEmptyState())
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate((context, index) {
+                if (index >= _filteredPosts.length) return null;
+
+                final post = _filteredPosts[index];
+                return Padding(
+                  padding: const EdgeInsets.only(
+                    left: 25,
+                    right: 25,
+                    bottom: 16,
+                  ),
+                  child: PostCard(
+                    post: post,
+                    onDelete: () => _deletePost(post.id),
+                    onTap: () => _navigateToPostDetail(post),
+                  ),
+                );
+              }, childCount: _filteredPosts.length),
+            ),
+
+          // Extra space for FAB
+          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptySearchResults() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40.0),
+        child: Column(
+          children: [
+            Icon(Icons.search_off, size: 80, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            Text(
+              'No results found',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey.shade600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Try searching with different keywords',
+              style: TextStyle(fontSize: 16, color: Colors.grey.shade500),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40.0),
+        child: Column(
+          children: [
+            Icon(
+              Icons.directions_car_outlined,
+              size: 80,
+              color: Colors.grey.shade400,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'No posts yet',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF123458),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Be the first to share your vehicle for rent!',
+              style: TextStyle(fontSize: 16, color: Colors.grey.shade500),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _navigateToCreatePost,
+              icon: const Icon(Icons.add),
+              label: const Text('Create First Post'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF123458),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

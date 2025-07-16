@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:VehiCall/utils/validators.dart';
+import 'package:VehiCall/utils/error_handler.dart';
+import 'package:VehiCall/config/app_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Access the global Supabase client
 final _supabase = Supabase.instance.client;
 
 class RegistrationPage extends StatefulWidget {
@@ -12,60 +14,38 @@ class RegistrationPage extends StatefulWidget {
 }
 
 class _RegistrationPageState extends State<RegistrationPage> {
-  // Text controllers
   final fullNameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
-
-  // Form key for validation
   final _formKey = GlobalKey<FormState>();
-
-  // Loading state
   bool isLoading = false;
-
-  // Error message
-  String? errorMessage;
-
-  // Password visibility
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
-  // Register method using Supabase
   Future<void> register() async {
-    // Validate form
     if (_formKey.currentState!.validate()) {
       setState(() {
         isLoading = true;
-        errorMessage = null;
       });
 
       try {
-        // Sign up with Supabase auth
         final AuthResponse res = await _supabase.auth.signUp(
           email: emailController.text.trim(),
           password: passwordController.text,
           data: {'full_name': fullNameController.text},
-          emailRedirectTo: 'io.flutter.vehicall://login-callback',
         );
 
-        // If sign up is successful, store additional user data in a Supabase table
         if (res.user != null) {
           try {
-            // Store additional user data in the profiles table
             final profileData = {
               'id': res.user!.id,
               'full_name': fullNameController.text,
               'created_at': DateTime.now().toIso8601String(),
             };
 
-            // Insert profile data and handle any errors
-            final profileResponse =
-                await _supabase.from('profiles').upsert(profileData).select();
+            await _supabase.from('profiles').upsert(profileData).select();
 
-            print('Profile created successfully: $profileResponse');
-
-            // Return to login page with success message
             if (mounted) {
               Navigator.pop(context, {
                 'success': true,
@@ -73,19 +53,10 @@ class _RegistrationPageState extends State<RegistrationPage> {
               });
             }
           } catch (profileError) {
-            print('Error creating profile: $profileError');
-
-            // Even if profile creation fails, the user is still created
-            // We can still return success but log the error
             if (mounted) {
-              // Show a warning about profile creation
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Account created, but profile setup had an issue. This will be fixed automatically when you sign in.',
-                  ),
-                  backgroundColor: Colors.orange,
-                ),
+              ErrorHandler.showErrorSnackBar(
+                context,
+                'Account created, but profile setup had an issue. This will be fixed automatically when you sign in.',
               );
 
               Navigator.pop(context, {
@@ -94,30 +65,14 @@ class _RegistrationPageState extends State<RegistrationPage> {
               });
             }
           }
-        } else {
-          // Should not normally reach here, but just in case
-          if (mounted) {
-            setState(() {
-              errorMessage = "Registration failed. Please try again.";
-              isLoading = false;
-            });
-          }
-        }
-      } on AuthException catch (error) {
-        // Handle specific Supabase auth errors
-        print('Auth error: ${error.message}');
-        if (mounted) {
-          setState(() {
-            errorMessage = error.message;
-            isLoading = false;
-          });
         }
       } catch (error) {
-        // Handle other errors
-        print('Unexpected error: $error');
+        if (mounted) {
+          ErrorHandler.showErrorSnackBar(context, error);
+        }
+      } finally {
         if (mounted) {
           setState(() {
-            errorMessage = "An unexpected error occurred: $error";
             isLoading = false;
           });
         }
@@ -153,7 +108,6 @@ class _RegistrationPageState extends State<RegistrationPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Logo
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 20.0),
@@ -163,23 +117,17 @@ class _RegistrationPageState extends State<RegistrationPage> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 10),
-
-                  // Welcome text
-                  const Center(
-                    child: Text(
-                      'Join VehiCall',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 24,
-                        color: Color(0xFF123458),
-                      ),
+                  Text(
+                    'Join ${AppConfig.appName}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 24,
+                      color: Color(0xFF123458),
                     ),
+                    textAlign: TextAlign.center,
                   ),
-
                   const SizedBox(height: 10),
-
                   const Center(
                     child: Text(
                       'Create an account to start renting vehicles',
@@ -187,33 +135,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
                       textAlign: TextAlign.center,
                     ),
                   ),
-
                   const SizedBox(height: 30),
-
-                  // Error message if any
-                  if (errorMessage != null)
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      margin: const EdgeInsets.only(bottom: 20),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.error_outline, color: Colors.red),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              errorMessage!,
-                              style: const TextStyle(color: Colors.red),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Full Name field
                   TextFormField(
                     controller: fullNameController,
                     decoration: InputDecoration(
@@ -235,20 +157,9 @@ class _RegistrationPageState extends State<RegistrationPage> {
                       ),
                     ),
                     autocorrect: false,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your full name';
-                      }
-                      if (value.length < 3) {
-                        return 'Name must be at least 3 characters';
-                      }
-                      return null;
-                    },
+                    validator: Validators.validateName,
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Email field
                   TextFormField(
                     controller: emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -272,23 +183,9 @@ class _RegistrationPageState extends State<RegistrationPage> {
                     ),
                     autocorrect: false,
                     enableSuggestions: false,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your email';
-                      }
-                      // Simple email validation
-                      if (!RegExp(
-                        r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                      ).hasMatch(value)) {
-                        return 'Please enter a valid email';
-                      }
-                      return null;
-                    },
+                    validator: Validators.validateEmail,
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Password field
                   TextFormField(
                     controller: passwordController,
                     obscureText: _obscurePassword,
@@ -325,28 +222,9 @@ class _RegistrationPageState extends State<RegistrationPage> {
                     ),
                     autocorrect: false,
                     enableSuggestions: false,
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter a password';
-                      }
-                      if (value.length < 6) {
-                        return 'Password must be at least 6 characters';
-                      }
-                      // Check for at least one uppercase letter
-                      if (!RegExp(r'[A-Z]').hasMatch(value)) {
-                        return 'Password must contain at least one uppercase letter';
-                      }
-                      // Check for at least one number
-                      if (!RegExp(r'[0-9]').hasMatch(value)) {
-                        return 'Password must contain at least one number';
-                      }
-                      return null;
-                    },
+                    validator: Validators.validatePassword,
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Confirm Password field
                   TextFormField(
                     controller: confirmPasswordController,
                     obscureText: _obscureConfirmPassword,
@@ -393,48 +271,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
                       return null;
                     },
                   ),
-
                   const SizedBox(height: 30),
-
-                  // Terms and conditions checkbox
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: true,
-                        onChanged: (value) {},
-                        activeColor: const Color(0xFF123458),
-                      ),
-                      Expanded(
-                        child: RichText(
-                          text: const TextSpan(
-                            text: 'I agree to the ',
-                            style: TextStyle(color: Colors.grey),
-                            children: [
-                              TextSpan(
-                                text: 'Terms of Service',
-                                style: TextStyle(
-                                  color: Color(0xFF123458),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              TextSpan(text: ' and '),
-                              TextSpan(
-                                text: 'Privacy Policy',
-                                style: TextStyle(
-                                  color: Color(0xFF123458),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // Register button
                   SizedBox(
                     width: double.infinity,
                     height: 55,
@@ -462,10 +299,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
                               ),
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Login option
                   Center(
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -494,5 +328,14 @@ class _RegistrationPageState extends State<RegistrationPage> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    fullNameController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    super.dispose();
   }
 }

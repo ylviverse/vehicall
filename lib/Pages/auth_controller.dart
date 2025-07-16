@@ -12,14 +12,36 @@ class AuthController {
   factory AuthController() => _instance;
   AuthController._internal();
 
+  // Check if Supabase is initialized
+  bool isSupabaseInitialized() {
+    try {
+      // This will throw an error if Supabase is not initialized
+      final client = Supabase.instance.client;
+      return true;
+    } catch (e) {
+      print('Supabase not initialized: $e');
+      return false;
+    }
+  }
+
   // Check if user is logged in
   bool isLoggedIn() {
-    return supabase.auth.currentUser != null;
+    try {
+      return supabase.auth.currentUser != null;
+    } catch (e) {
+      print('Error checking login status: $e');
+      return false;
+    }
   }
 
   // Get current user
   User? getCurrentUser() {
-    return supabase.auth.currentUser;
+    try {
+      return supabase.auth.currentUser;
+    } catch (e) {
+      print('Error getting current user: $e');
+      return null;
+    }
   }
 
   // Sign out

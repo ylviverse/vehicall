@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:VehiCall/Pages/home_page.dart';
 import 'package:VehiCall/Pages/registration_page.dart';
+import 'package:VehiCall/utils/validators.dart';
+import 'package:VehiCall/utils/error_handler.dart';
+import 'package:VehiCall/config/app_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Add this import at the top of the file
-import 'package:flutter/foundation.dart';
-import 'package:uni_links/uni_links.dart';
-import 'dart:async';
-
-// Access the global Supabase client
 final _supabase = Supabase.instance.client;
 
 class LoginPage extends StatefulWidget {
@@ -19,70 +16,35 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  // Add these variables to the _LoginPageState class
-  bool _initialUriIsHandled = false;
-  StreamSubscription? _streamSubscription;
-
-  // Text controllers
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
-
-  // Form key for validation
   final _formKey = GlobalKey<FormState>();
-
-  // Loading state
   bool isLoading = false;
 
-  // Error message
-  String? errorMessage;
 
-  // Sign in method using Supabase
-  Future<void> signIn() async {
-    // Validate form
+   Future<void> signIn() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
         isLoading = true;
-        errorMessage = null;
       });
 
       try {
-        // Authenticate with Supabase
-        final response = await _supabase.auth.signInWithPassword(
+        // Just sign in. AuthWrapper will handle navigation.
+        await _supabase.auth.signInWithPassword(
           email: emailController.text.trim(),
           password: passwordController.text,
         );
 
-        // Check if authentication was successful
-        if (response.user != null) {
-          // Navigate to home page on success
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomePage()),
-            );
-          }
-        } else {
-          // Should not reach here normally, but just in case
-          if (mounted) {
-            setState(() {
-              errorMessage = "Authentication failed";
-              isLoading = false;
-            });
-          }
-        }
-      } on AuthException catch (error) {
-        // Handle specific Supabase auth errors
-        if (mounted) {
-          setState(() {
-            errorMessage = error.message;
-            isLoading = false;
-          });
-        }
+        // No navigation logic here.
+        // The StreamBuilder in AuthWrapper handles it.
+
       } catch (error) {
-        // Handle other errors
+        if (mounted) {
+          ErrorHandler.showErrorSnackBar(context, error);
+        }
+      } finally {
         if (mounted) {
           setState(() {
-            errorMessage = "An unexpected error occurred";
             isLoading = false;
           });
         }
@@ -90,82 +52,14 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // Add this method to the _LoginPageState class
   void _checkAndShowRegistrationResult(dynamic result) {
     if (result != null && result is Map && result['success'] == true) {
-      // Pre-fill email field
       emailController.text = result['email'];
-
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Registration successful! You can now sign in.'),
-          backgroundColor: Colors.green,
-        ),
+      ErrorHandler.showSuccessSnackBar(
+        context,
+        'Registration successful! You can now sign in.',
       );
     }
-  }
-
-  // Add this method to the _LoginPageState class
-  Future<void> _initDeepLinkListener() async {
-    // Handle case where app is opened from a deep link
-    if (!_initialUriIsHandled) {
-      _initialUriIsHandled = true;
-      try {
-        final initialUri = await getInitialUri();
-        if (initialUri != null) {
-          _handleDeepLink(initialUri);
-        }
-      } catch (e) {
-        print('Error handling initial deep link: $e');
-      }
-    }
-
-    // Handle case where app is already running and receives a deep link
-    _streamSubscription = uriLinkStream.listen(
-      (Uri? uri) {
-        if (uri != null) {
-          _handleDeepLink(uri);
-        }
-      },
-      onError: (error) {
-        print('Error handling deep link: $error');
-      },
-    );
-  }
-
-  // Add this method to handle the deep link
-  void _handleDeepLink(Uri uri) {
-    print('Deep link received: $uri');
-
-    // Extract the access token and refresh token from the URL if present
-    final accessToken = uri.queryParameters['access_token'];
-    final refreshToken = uri.queryParameters['refresh_token'];
-    final type = uri.queryParameters['type'];
-
-    if (accessToken != null && type == 'signup') {
-      // Show success message for email confirmation
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Email confirmed successfully! You can now sign in.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-  }
-
-  // Add this to the initState method
-  @override
-  void initState() {
-    super.initState();
-    _initDeepLinkListener();
-  }
-
-  // Add this to the dispose method
-  @override
-  void dispose() {
-    _streamSubscription?.cancel();
-    super.dispose();
   }
 
   @override
@@ -182,7 +76,6 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Logo
                     Padding(
                       padding: const EdgeInsets.all(25.0),
                       child: Image.asset(
@@ -190,10 +83,7 @@ class _LoginPageState extends State<LoginPage> {
                         height: 80,
                       ),
                     ),
-
                     const SizedBox(height: 10),
-
-                    // Welcome text
                     const Text(
                       'Welcome back!',
                       style: TextStyle(
@@ -202,40 +92,12 @@ class _LoginPageState extends State<LoginPage> {
                         color: Color(0xFF123458),
                       ),
                     ),
-
                     const SizedBox(height: 10),
-
                     const Text(
                       'Please sign in to continue',
                       style: TextStyle(fontSize: 16, color: Colors.grey),
                     ),
-
                     const SizedBox(height: 30),
-
-                    // Error message if any
-                    if (errorMessage != null)
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        margin: const EdgeInsets.only(bottom: 20),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error_outline, color: Colors.red),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                errorMessage!,
-                                style: const TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                    // Email field
                     TextFormField(
                       controller: emailController,
                       decoration: InputDecoration(
@@ -258,20 +120,9 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       autocorrect: false,
                       enableSuggestions: false,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        }
-                        if (!value.contains('@')) {
-                          return 'Please enter a valid email';
-                        }
-                        return null;
-                      },
+                      validator: Validators.validateEmail,
                     ),
-
                     const SizedBox(height: 20),
-
-                    // Password field
                     TextFormField(
                       controller: passwordController,
                       obscureText: true,
@@ -299,24 +150,17 @@ class _LoginPageState extends State<LoginPage> {
                         if (value == null || value.isEmpty) {
                           return 'Please enter your password';
                         }
-                        if (value.length < 6) {
-                          return 'Password must be at least 6 characters';
-                        }
                         return null;
                       },
                     ),
-
                     const SizedBox(height: 10),
-
-                    // Forgot password
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () {
-                          // Implement password reset with Supabase
                           showDialog(
                             context: context,
-                            builder: (context) => ResetPasswordDialog(),
+                            builder: (context) => const ResetPasswordDialog(),
                           );
                         },
                         child: const Text(
@@ -328,10 +172,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 20),
-
-                    // Sign in button
                     SizedBox(
                       width: double.infinity,
                       height: 55,
@@ -359,10 +200,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                       ),
                     ),
-
                     const SizedBox(height: 20),
-
-                    // Register option
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -372,15 +210,12 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         GestureDetector(
                           onTap: () async {
-                            // Navigate to registration page
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => const RegistrationPage(),
                               ),
                             );
-
-                            // Check if registration was successful
                             _checkAndShowRegistrationResult(result);
                           },
                           child: const Text(
@@ -402,12 +237,20 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 }
 
-// Password Reset Dialog
 class ResetPasswordDialog extends StatefulWidget {
+  const ResetPasswordDialog({super.key});
+
   @override
-  _ResetPasswordDialogState createState() => _ResetPasswordDialogState();
+  State<ResetPasswordDialog> createState() => _ResetPasswordDialogState();
 }
 
 class _ResetPasswordDialogState extends State<ResetPasswordDialog> {
@@ -424,21 +267,15 @@ class _ResetPasswordDialogState extends State<ResetPasswordDialog> {
 
     try {
       await _supabase.auth.resetPasswordForEmail(_emailController.text.trim());
-
       setState(() {
         _isLoading = false;
         _isSuccess = true;
         _message = 'Password reset link sent to your email';
       });
-    } on AuthException catch (error) {
-      setState(() {
-        _isLoading = false;
-        _message = error.message;
-      });
     } catch (error) {
       setState(() {
         _isLoading = false;
-        _message = 'An unexpected error occurred';
+        _message = ErrorHandler.getErrorMessage(error);
       });
     }
   }
@@ -446,13 +283,15 @@ class _ResetPasswordDialogState extends State<ResetPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Reset Password'),
+      title: const Text('Reset Password'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Enter your email address to receive a password reset link'),
-            SizedBox(height: 16),
+            const Text(
+              'Enter your email address to receive a password reset link',
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _emailController,
               decoration: InputDecoration(
@@ -464,9 +303,9 @@ class _ResetPasswordDialogState extends State<ResetPasswordDialog> {
               keyboardType: TextInputType.emailAddress,
             ),
             if (_message != null) ...[
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               Container(
-                padding: EdgeInsets.all(8),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color:
                       _isSuccess ? Colors.green.shade100 : Colors.red.shade100,
@@ -489,21 +328,29 @@ class _ResetPasswordDialogState extends State<ResetPasswordDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: Text('Cancel'),
+          child: const Text('Cancel'),
         ),
         ElevatedButton(
           onPressed: _isLoading ? null : _resetPassword,
-          style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF123458)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF123458),
+          ),
           child:
               _isLoading
-                  ? SizedBox(
+                  ? const SizedBox(
                     height: 20,
                     width: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                  : Text('Send Reset Link'),
+                  : const Text('Send Reset Link'),
         ),
       ],
     );
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
   }
 }

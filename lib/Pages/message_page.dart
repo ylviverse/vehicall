@@ -28,7 +28,7 @@ class _MessagePageState extends State<MessagePage> {
   String _recipientName = '';
   String? _recipientId;
   String? _currentUserId;
-  String _currentUserName = 'You'; // Default name for current user
+  String _currentUserName = ''; // Actual user name, not "You"
   bool _isLoading = true;
   bool _isLoadingConversations = true;
   String? _errorMessage;
@@ -116,11 +116,16 @@ class _MessagePageState extends State<MessagePage> {
         if (user?.email != null) {
           _currentUserName = user!.email!.split('@')[0];
           print('Using email from auth: $_currentUserName');
+        } else {
+          // Last resort - use user ID
+          _currentUserName = 'User ${_currentUserId!.substring(0, 4)}';
+          print('Using user ID as name: $_currentUserName');
         }
       }
     } catch (e) {
       print('Error getting current user name: $e');
-      // Keep default name
+      // Use user ID as fallback
+      _currentUserName = 'User ${_currentUserId!.substring(0, 4)}';
     }
   }
 
@@ -317,17 +322,13 @@ class _MessagePageState extends State<MessagePage> {
             // Get sender name from the message
             String senderName;
             if (isFromUser) {
-              senderName = "You"; // For messages from the current user
+              // For messages from the current user, display "You" in the UI
+              senderName = "You";
             } else {
               // For messages from the other user, use sender_name from the message
               senderName = message['sender_name'] ?? _recipientName;
-              if (senderName.isEmpty || senderName == "You") {
-                // If the sender_name is "You" (which is incorrect for received messages) or empty,
-                // use the recipient name we have
-                senderName = _recipientName;
-                if (senderName.isEmpty) {
-                  senderName = 'User ${senderId.substring(0, 4)}';
-                }
+              if (senderName.isEmpty) {
+                senderName = 'User ${senderId.substring(0, 4)}';
               }
             }
 
@@ -377,16 +378,13 @@ class _MessagePageState extends State<MessagePage> {
             // Get sender name from the message
             String senderName;
             if (senderId == _currentUserId) {
+              // For messages from the current user, display "You" in the UI
               senderName = "You";
             } else {
+              // For messages from the other user, use sender_name from the message
               senderName = payload['new']['sender_name'] ?? _recipientName;
-              if (senderName.isEmpty || senderName == "You") {
-                // If the sender_name is "You" (which is incorrect for received messages) or empty,
-                // use the recipient name we have
-                senderName = _recipientName;
-                if (senderName.isEmpty) {
-                  senderName = 'User ${senderId.substring(0, 4)}';
-                }
+              if (senderName.isEmpty) {
+                senderName = 'User ${senderId.substring(0, 4)}';
               }
             }
 
@@ -425,7 +423,8 @@ class _MessagePageState extends State<MessagePage> {
     if (message.trim().isEmpty) return;
 
     try {
-      // Insert the message into the database with sender and receiver names
+      // Insert the message into the database with actual sender and receiver names
+      // NOT using "You" in the database
       final response =
           await _supabase.from('messages').insert({
             'sender_id': _currentUserId,
@@ -433,7 +432,7 @@ class _MessagePageState extends State<MessagePage> {
             'content': message,
             'created_at': DateTime.now().toIso8601String(),
             'is_read': false,
-            'sender_name': _currentUserName,
+            'sender_name': _currentUserName, // Store actual name, not "You"
             'receiver_name': _recipientName,
           }).select();
 

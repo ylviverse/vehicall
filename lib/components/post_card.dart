@@ -1,26 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:VehiCall/model/post.dart';
 import 'package:timeago/timeago.dart' as timeago;
-import 'package:VehiCall/model/fav.dart';
-import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide Provider;
-import 'package:VehiCall/Pages/message_page.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:VehiCall/components/post_message_input.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
   final VoidCallback? onTap;
   final Function? onDelete;
-  final VoidCallback? onMessageTap; // Add this new callback
 
-  const PostCard({
-    super.key,
-    required this.post,
-    this.onTap,
-    this.onDelete,
-    this.onMessageTap, // Add this parameter
-  });
+  const PostCard({super.key, required this.post, this.onTap, this.onDelete});
 
   @override
   State<PostCard> createState() => _PostCardState();
@@ -46,7 +35,6 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _contactPoster() {
-    // Check if we have the necessary information
     if (widget.post.userId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -57,7 +45,6 @@ class _PostCardState extends State<PostCard> {
       return;
     }
 
-    // Show a bottom sheet with the message input
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -101,19 +88,7 @@ class _PostCardState extends State<PostCard> {
                     recipientName: widget.post.userName,
                     postTitle: widget.post.title,
                     onMessageSent: ({String? name}) {
-                      // Close the bottom sheet
                       Navigator.pop(context);
-
-                      // If we got an updated name, show a snackbar with the correct name
-                      if (name != null && name != widget.post.userName) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Message sent to $name'),
-                            backgroundColor: Colors.green,
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      }
                     },
                   ),
                 ],
@@ -128,9 +103,7 @@ class _PostCardState extends State<PostCard> {
     return GestureDetector(
       onTap: widget.onTap,
       child: Container(
-        width:
-            MediaQuery.of(context).size.width *
-            0.85, // Change from fixed 300 to responsive width
+        width: MediaQuery.of(context).size.width * 0.85,
         margin: const EdgeInsets.only(right: 16),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -145,7 +118,7 @@ class _PostCardState extends State<PostCard> {
           ],
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min, // Add this to prevent overflow
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Post header with user info
@@ -216,9 +189,7 @@ class _PostCardState extends State<PostCard> {
 
             // Post image
             Container(
-              height:
-                  MediaQuery.of(context).size.width *
-                  0.4, // Responsive height based on screen width
+              height: MediaQuery.of(context).size.width * 0.4,
               width: double.infinity,
               decoration: BoxDecoration(color: Colors.grey[200]),
               child: _buildImageWidget(),
@@ -228,14 +199,14 @@ class _PostCardState extends State<PostCard> {
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Text(
-                widget.post.description,
+                widget.post.description ?? '',
                 style: const TextStyle(fontSize: 12),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
 
-            const Spacer(),
+  
 
             // Car title and price row
             Padding(
@@ -243,7 +214,6 @@ class _PostCardState extends State<PostCard> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Title (styled like Vios)
                   Expanded(
                     child: Text(
                       widget.post.title ?? widget.post.userName,
@@ -257,10 +227,8 @@ class _PostCardState extends State<PostCard> {
                     ),
                   ),
 
-                  // Action buttons
                   Row(
                     children: [
-                      // Message button
                       if (!_isCurrentUserPost)
                         IconButton(
                           icon: const Icon(Icons.message_outlined),
@@ -272,7 +240,6 @@ class _PostCardState extends State<PostCard> {
 
                       const SizedBox(width: 8),
 
-                      // Delete button (only for user's own posts)
                       if (_isCurrentUserPost && widget.onDelete != null)
                         IconButton(
                           icon: const Icon(
@@ -284,31 +251,13 @@ class _PostCardState extends State<PostCard> {
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                         ),
-
-                      if (_isCurrentUserPost) const SizedBox(width: 8),
-
-                      // Favorite button
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.favorite, color: Colors.white),
-                          onPressed: () {},
-                          iconSize: 18,
-                          padding: EdgeInsets.zero,
-                        ),
-                      ),
                     ],
                   ),
                 ],
               ),
             ),
 
-            // Price (styled like 1400 / day)
+            // Price
             Padding(
               padding: const EdgeInsets.only(
                 left: 12.0,
@@ -332,17 +281,11 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  // New method to build the image widget with proper error handling
   Widget _buildImageWidget() {
-    // Print the image URL for debugging
-    print('Loading image from URL: ${widget.post.imageUrl}');
-
-    // Check if the URL is empty
     if (widget.post.imageUrl.isEmpty) {
       return _buildPlaceholderImage('No image available');
     }
 
-    // Try to load the image directly with Image.network for simplicity
     return Image.network(
       widget.post.imageUrl,
       fit: BoxFit.cover,
@@ -360,13 +303,11 @@ class _PostCardState extends State<PostCard> {
         );
       },
       errorBuilder: (context, error, stackTrace) {
-        print('Error loading image: $error');
         return _buildPlaceholderImage('Image not available');
       },
     );
   }
 
-  // Helper method for placeholder images
   Widget _buildPlaceholderImage(String message) {
     return Container(
       color: Colors.grey[200],

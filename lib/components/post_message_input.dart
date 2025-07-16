@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:VehiCall/utils/error_handler.dart';
+import 'package:VehiCall/utils/validators.dart';
+import 'package:VehiCall/config/app_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class PostMessageInput extends StatefulWidget {
@@ -23,13 +26,11 @@ class _PostMessageInputState extends State<PostMessageInput> {
   final TextEditingController _messageController = TextEditingController();
   final _supabase = Supabase.instance.client;
   bool _isSending = false;
-  String? _errorMessage;
-  String _senderName = 'You'; // Default sender name
+  String _senderName = '';
 
   @override
   void initState() {
     super.initState();
-    // Pre-fill with a default message if post title is available
     if (widget.postTitle != null && widget.postTitle!.isNotEmpty) {
       _messageController.text =
           "Hello, is your ${widget.postTitle} still available?";
@@ -37,23 +38,18 @@ class _PostMessageInputState extends State<PostMessageInput> {
       _messageController.text = "Hello, is this still available?";
     }
 
-    // Get current user's name
     _getCurrentUserName();
 
-    // Fetch recipient name if it's empty or just "User"
     if (widget.recipientName.isEmpty || widget.recipientName == "User") {
       _fetchRecipientName();
     }
   }
 
-  // Get current user's name
   Future<void> _getCurrentUserName() async {
     final currentUserId = _supabase.auth.currentUser?.id;
     if (currentUserId == null) return;
 
     try {
-      // First try to get name from posts table
-      print('Trying to get current user name from posts table');
       final postsData =
           await _supabase
               .from('posts')
@@ -66,12 +62,9 @@ class _PostMessageInputState extends State<PostMessageInput> {
           postsData['user_name'] != null &&
           postsData['user_name'].toString().isNotEmpty) {
         _senderName = postsData['user_name'];
-        print('Found current user name in posts: $_senderName');
         return;
       }
 
-      // If not found in posts, try profiles table
-      print('Trying to get current user name from profiles table');
       final profileData =
           await _supabase
               .from('profiles')
@@ -83,30 +76,24 @@ class _PostMessageInputState extends State<PostMessageInput> {
         if (profileData['full_name'] != null &&
             profileData['full_name'].toString().isNotEmpty) {
           _senderName = profileData['full_name'];
-          print('Found current user name in profiles: $_senderName');
         } else if (profileData['email'] != null) {
           _senderName = profileData['email'].toString().split('@')[0];
-          print('Using email from profile: $_senderName');
         }
       } else {
-        // Try to get email from auth
         final user = _supabase.auth.currentUser;
         if (user?.email != null) {
           _senderName = user!.email!.split('@')[0];
-          print('Using email from auth: $_senderName');
+        } else {
+          _senderName = 'User ${currentUserId.substring(0, 4)}';
         }
       }
     } catch (e) {
-      print('Error getting sender name: $e');
-      // Keep default name
+      _senderName = 'User ${currentUserId.substring(0, 4)}';
     }
   }
 
-  // Add a method to fetch the recipient's name
   Future<void> _fetchRecipientName() async {
     try {
-      // First try posts table
-      print('Trying to get recipient name from posts table');
       final postsData =
           await _supabase
               .from('posts')
@@ -119,11 +106,8 @@ class _PostMessageInputState extends State<PostMessageInput> {
           postsData['user_name'] != null &&
           postsData['user_name'].toString().isNotEmpty) {
         String name = postsData['user_name'];
-        print('Found recipient name in posts: $name');
 
-        // Update the UI with the fetched name
         if (mounted && name != "User") {
-          // Use a callback to update the parent widget with the new name
           if (widget.onMessageSent != null) {
             widget.onMessageSent!(name: name);
           }
@@ -131,8 +115,6 @@ class _PostMessageInputState extends State<PostMessageInput> {
         return;
       }
 
-      // If not found in posts, try profiles table
-      print('Trying to get recipient name from profiles table');
       final profileData =
           await _supabase
               .from('profiles')
@@ -140,55 +122,54 @@ class _PostMessageInputState extends State<PostMessageInput> {
               .eq('id', widget.recipientId)
               .maybeSingle();
 
-      // Default name if profile info is missing
       String name = "User";
 
       if (profileData != null) {
-        // Use full name if available, otherwise use email or a default
         if (profileData['full_name'] != null &&
             profileData['full_name'].toString().isNotEmpty) {
           name = profileData['full_name'];
-          print('Found recipient name in profiles: $name');
         } else if (profileData['email'] != null) {
-          // Extract username part from email
           name = profileData['email'].toString().split('@')[0];
-          print('Using email from profile: $name');
         }
       }
 
-      // Update the UI with the fetched name
       if (mounted && name != "User") {
-        // Use a callback to update the parent widget with the new name
         if (widget.onMessageSent != null) {
           widget.onMessageSent!(name: name);
         }
       }
     } catch (e) {
-      print('Error fetching recipient name: $e');
+      // Handle error silently
     }
   }
 
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty || _isSending) return;
+    final messageText = _messageController.text.trim();
 
-    final messageText = _messageController.text;
+    // Validate message
+    final validationError = Validators.validateMessage(messageText);
+    if (validationError != null) {
+      ErrorHandler.showErrorSnackBar(context, validationError);
+      return;
+    }
+
+    if (_isSending) return;
+
     final currentUserId = _supabase.auth.currentUser?.id;
 
-    // Validate user is logged in
     if (currentUserId == null) {
-      setState(() {
-        _errorMessage = 'You must be logged in to send messages';
-      });
+      ErrorHandler.showErrorSnackBar(
+        context,
+        'You must be logged in to send messages',
+      );
       return;
     }
 
     setState(() {
       _isSending = true;
-      _errorMessage = null;
     });
 
     try {
-      // Insert the message into the database with sender and receiver names
       await _supabase.from('messages').insert({
         'sender_id': currentUserId,
         'receiver_id': widget.recipientId,
@@ -199,32 +180,22 @@ class _PostMessageInputState extends State<PostMessageInput> {
         'receiver_name': widget.recipientName,
       });
 
-      print(
-        'Message sent with sender_name: $_senderName and receiver_name: ${widget.recipientName}',
-      );
-
-      // Clear the message field after successful send
       _messageController.clear();
 
-      // Show success message
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Message sent to ${widget.recipientName}'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
-          ),
+        ErrorHandler.showSuccessSnackBar(
+          context,
+          'Message sent to ${widget.recipientName}',
         );
       }
 
-      // Call the callback if provided
       if (widget.onMessageSent != null) {
         widget.onMessageSent!();
       }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to send message: ${e.toString()}';
-      });
+      if (mounted) {
+        ErrorHandler.showErrorSnackBar(context, 'Failed to send message');
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -253,7 +224,6 @@ class _PostMessageInputState extends State<PostMessageInput> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title
           Row(
             children: [
               const Icon(Icons.message, color: Color(0xFF123458)),
@@ -267,37 +237,10 @@ class _PostMessageInputState extends State<PostMessageInput> {
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
-          // Error message if any
-          if (_errorMessage != null)
-            Container(
-              padding: const EdgeInsets.all(8),
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: Colors.red.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.error_outline, color: Colors.red[700], size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _errorMessage!,
-                      style: TextStyle(color: Colors.red[700], fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          // Message input and send button
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // Text field
               Expanded(
                 child: TextField(
                   controller: _messageController,
@@ -307,6 +250,13 @@ class _PostMessageInputState extends State<PostMessageInput> {
                       borderRadius: BorderRadius.circular(24),
                       borderSide: BorderSide(color: Colors.grey[300]!),
                     ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF123458),
+                        width: 2,
+                      ),
+                    ),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 12,
@@ -314,13 +264,11 @@ class _PostMessageInputState extends State<PostMessageInput> {
                   ),
                   minLines: 1,
                   maxLines: 3,
+                  maxLength: AppConfig.maxMessageLength,
                   textCapitalization: TextCapitalization.sentences,
                 ),
               ),
-
               const SizedBox(width: 8),
-
-              // Send button
               ElevatedButton(
                 onPressed: _isSending ? null : _sendMessage,
                 style: ElevatedButton.styleFrom(
