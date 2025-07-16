@@ -2,9 +2,11 @@ import 'package:VehiCall/Pages/home_page.dart';
 import 'package:VehiCall/Pages/intro_page.dart';
 import 'package:VehiCall/config/app_config.dart';
 import 'package:flutter/material.dart';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:VehiCall/error_boundary.dart';
+
 
 final supabase = Supabase.instance.client;
 
@@ -30,16 +32,10 @@ Future<void> main() async {
   };
 
   try {
-    // Initialize Supabase with proper error handling
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
-      authFlowType: AuthFlowType.pkce,
-    ).timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {
-        throw Exception('Supabase initialization timed out');
-      },
+     
     );
 
     print('Supabase initialized successfully');
@@ -110,7 +106,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ...existing code...
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
 
@@ -119,30 +114,60 @@ class AuthWrapper extends StatefulWidget {
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
+  bool _isInitialized = false;
+  bool _isInitializing = false;
+
   @override
   void initState() {
     super.initState();
-    _recoverSession();
+    _initializeAuth();
   }
 
-  Future<void> _recoverSession() async {
-    // This is needed to handle the initial deep link authentication flow.
+  Future<void> _initializeAuth() async {
+    if (_isInitializing) return; // Prevent multiple calls
+    
+    setState(() {
+      _isInitializing = true;
+    });
+
+    print("AuthWrapper: Initializing auth...");
     try {
-      await supabase.auth.getSessionFromUrl(
-        Uri.parse(Uri.base.toString()),
-        storeSession: true,
-      );
+      // Only attempt URL recovery if we're on web and there's actually a URL fragment
+      if (kIsWeb && Uri.base.fragment.isNotEmpty) {
+        print("AuthWrapper: Attempting to recover session from URL...");
+        await supabase.auth.getSessionFromUrl(
+          Uri.parse(Uri.base.toString()),
+          storeSession: true,
+        );
+        print("AuthWrapper: Session recovery from URL completed.");
+      }
     } catch (e) {
-      // Ignore errors, session will be null if there's no auth code in the URL
+      print("AuthWrapper: Error recovering session from URL: $e");
     }
+    
+    setState(() {
+      _isInitialized = true;
+      _isInitializing = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    print("AuthWrapper: Build method started.");
+    
+    if (!_isInitialized) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF123458)),
+        ),
+      );
+    }
+
     return StreamBuilder<AuthState>(
       stream: supabase.auth.onAuthStateChange,
       builder: (context, snapshot) {
-        // Handle connection state
+        print("AuthWrapper: StreamBuilder running. State: ${snapshot.connectionState}");
+        
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(
@@ -151,11 +176,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
           );
         }
 
-        final session = snapshot.data?.session;
+        final session = supabase.auth.currentSession; // Use currentSession instead of snapshot.data
+        print("AuthWrapper: Current session is ${session == null ? 'null' : 'active'}.");
 
         if (session != null) {
+          print("AuthWrapper: User is authenticated, showing HomePage");
           return const HomePage();
         } else {
+          print("AuthWrapper: User is not authenticated, showing IntroPage");
           return const IntroPage();
         }
       },

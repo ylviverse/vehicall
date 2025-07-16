@@ -30,7 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  supabase_flutter: ^1.10.0
+  supabase_flutter: ^2.5.3
   uni_links: ^0.5.1
   cupertino_icons: ^1.0.8
   google_nav_bar: ^5.0.6
@@ -41,6 +41,7 @@ dependencies:
   http: ^1.1.0
   path: ^1.8.3
   cached_network_image: ^3.3.0
+  flutter_secure_storage: ^9.2.2 
 dev_dependencies:
   flutter_test:
     sdk: flutter
